@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "beexar"
-version = "1.0.0"
+version = "1.0.1"
 description = "Beexar operator SDK — launch game sessions and serve the four seamless-wallet callbacks."
 readme = "README.md"
 license = { text = "MIT" }

@@ -43,7 +43,7 @@ from .wallet import MAX_BODY_BYTES, DispatchResponse, WalletServer, route_from_p
 
 #: Stamped at release time from sdk/VERSION. The same number is published for
 #: the Node, PHP, Go and Python SDKs and always means the same contract snapshot.
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 __all__ = [
     "__version__",
