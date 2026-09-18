@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "beexar"
+version = "1.0.0"
+description = "Beexar operator SDK — launch game sessions and serve the four seamless-wallet callbacks."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+keywords = ["beexar", "casino", "seamless-wallet", "game-aggregator", "softswiss", "betwin", "rollback"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
+# No runtime dependencies, on purpose. Forcing pydantic or urllib3 pins into an
+# operator's existing application is a real integration tax, and this contract
+# is small enough not to need either.
+dependencies = []
+
+[project.urls]
+Documentation = "https://docs.beexar.com/tools/sdk-python/"
+Source = "https://github.com/beexar-games/beexar-python"
+Issues = "https://github.com/beexar-games/beexar-python/issues"
+
+[project.optional-dependencies]
+dev = ["pytest==8.3.4"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["beexar"]
+
+[tool.hatch.build.targets.sdist]
+include = ["beexar", "examples", "openapi", "README.md", "LICENSE", "CHANGELOG.md", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
