@@ -25,9 +25,9 @@ jobs:
     strategy:
       matrix:
         # The floor and the ceiling of what pyproject.toml claims to support.
-        # Testing only the newest would let a 3.12-only construct ship to a
-        # 3.9 user.
-        python-version: ['3.9', '3.13']
+        # Testing only the newest would let a 3.14-only construct ship to a
+        # 3.11 user.
+        python-version: ['3.11', '3.14']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

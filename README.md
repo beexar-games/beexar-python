@@ -3,7 +3,7 @@
 Beexar operator SDK for Python. Launch game sessions, and serve the four
 seamless-wallet callbacks the platform calls during play.
 
-**Zero runtime dependencies** — standard library only. Python 3.9+.
+**Zero runtime dependencies** — standard library only. Python 3.11+.
 
 ```bash
 pip install beexar

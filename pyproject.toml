@@ -4,21 +4,20 @@ build-backend = "hatchling.build"
 
 [project]
 name = "beexar"
-version = "1.0.2"
+version = "1.1.0"
 description = "Beexar operator SDK — launch game sessions and serve the four seamless-wallet callbacks."
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 keywords = ["beexar", "casino", "seamless-wallet", "game-aggregator", "softswiss", "betwin", "rollback"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries",
     "Typing :: Typed",
 ]

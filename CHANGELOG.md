@@ -4,6 +4,11 @@ All notable changes to `beexar`. The version is shared across the Beexar SDKs
 for Node, PHP, Go and Python — the same number always means the same contract
 snapshot.
 
+## 1.1.0 — 2026-10-04
+
+Python 3.11 or newer, up from 3.9: 3.9 and 3.10 are past end of life upstream.
+pip on an older Python keeps resolving 1.0.2. No change to the API.
+
 ## 1.0.2 — 2026-09-18
 
 No change to the code you consume. 1.0.1 reached PyPI, Packagist and the Go
