@@ -3,7 +3,7 @@
 Two halves:
 
 * :class:`~beexar.launcher.Client` — the calls you send to Beexar.
-* :class:`~beexar.wallet.WalletServer` — the four callbacks Beexar sends you.
+* :class:`~beexar.wallet.WalletServer` — the callbacks Beexar sends you.
 
 See https://docs.beexar.com for the full contract.
 """
@@ -31,6 +31,8 @@ from .types import (
     BetWinTransactionResult,
     FinishRequest,
     FinishResult,
+    FreespinsFinishRequest,
+    FreespinsFinishResult,
     RequestContext,
     RollbackRequest,
     RollbackResult,
@@ -43,7 +45,7 @@ from .wallet import MAX_BODY_BYTES, DispatchResponse, WalletServer, route_from_p
 
 #: Stamped at release time from sdk/VERSION. The same number is published for
 #: the Node, PHP, Go and Python SDKs and always means the same contract snapshot.
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 __all__ = [
     "__version__",
@@ -78,6 +80,8 @@ __all__ = [
     "RollbackResult",
     "FinishRequest",
     "FinishResult",
+    "FreespinsFinishRequest",
+    "FreespinsFinishResult",
     "WalletHandler",
     "WalletServer",
     "DispatchResponse",

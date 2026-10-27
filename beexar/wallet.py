@@ -1,4 +1,4 @@
-"""The wallet server: one pure function behind the four callbacks."""
+"""The wallet server: one pure function behind the callbacks."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from .types import (
     BetWinRequest,
     BetWinTransaction,
     FinishRequest,
+    FreespinsFinishRequest,
     RequestContext,
     RollbackRequest,
     RollbackTransaction,
@@ -34,15 +35,24 @@ class DispatchResponse(NamedTuple):
     headers: Dict[str, str]
 
 
+#: ``/freespins/finish`` ends with ``/finish`` too, so a suffix match has to try
+#: it before the shorter route it contains.
+_ROUTES_LONGEST_FIRST = tuple(sorted(ROUTES, key=len, reverse=True))
+
+_FREESPINS_NOT_IMPLEMENTED = "freespins finish is not implemented by this wallet"
+
+
 def route_from_path(path: str) -> Optional[Route]:
-    """Map a request path to one of the four callback routes.
+    """Map a request path to one of the callback routes.
 
     Matching is on the SUFFIX because the mount path belongs to you: the gateway
     POSTs to the full callback URL configured in the backoffice, prefix and all,
-    so ``/api/v2/psp/betwin`` is as valid as ``/betwin``.
+    so ``/api/v2/psp/betwin`` is as valid as ``/betwin``. The longest route
+    wins, so ``/wallet/freespins/finish`` is the freespins result and never the
+    round's ``/finish``.
     """
     clean = path.split("?", 1)[0].rstrip("/") or "/"
-    for route in ROUTES:
+    for route in _ROUTES_LONGEST_FIRST:
         if clean == route or clean.endswith(route):
             return route
     return None
@@ -100,6 +110,11 @@ class WalletServer:
     ) -> DispatchResponse:
         if route not in ROUTES:
             raise WalletError.not_found("unknown route: {}".format(route))
+        freespins_finish = getattr(self._handler, "freespins_finish", None)
+        if route == "/freespins/finish" and not callable(freespins_finish):
+            # An operator that does not issue freespins has nothing to settle;
+            # the route answers the way an unknown one does.
+            raise WalletError.not_found(_FREESPINS_NOT_IMPLEMENTED)
         if not isinstance(raw_body, (bytes, bytearray)):
             # A str here means something already decoded the bytes, and a decode
             # is not always reversible. Refuse rather than verify a lossy copy.
@@ -152,7 +167,12 @@ class WalletServer:
                 }
             )
 
-        result = self._handler.finish(_parse_finish(parsed), context)
+        if route == "/finish":
+            result = self._handler.finish(_parse_finish(parsed), context)
+            return _ok({"balance": str(result.balance)})
+
+        assert freespins_finish is not None  # checked before the signature
+        result = freespins_finish(_parse_freespins_finish(parsed), context)
         return _ok({"balance": str(result.balance)})
 
     def _explain_signature_failure(self, raw_body: bytes, signature: Optional[str]) -> None:
@@ -299,6 +319,16 @@ def _parse_finish(body: Mapping[str, Any]) -> FinishRequest:
         round_id=_require_string(body, "round_id"),
         session_id=_optional_string(body, "session_id"),
     )
+
+
+def _parse_freespins_finish(body: Mapping[str, Any]) -> FreespinsFinishRequest:
+    issue_id = _require_string(body, "issue_id")
+    # Zero is a valid result here — the freespins won nothing — so unlike a
+    # /betwin amount it is not refused. The shape rules are the same.
+    amount = Money.try_parse(body.get("amount"))
+    if amount is None:
+        raise WalletError.bad_request("amount: not a valid decimal amount")
+    return FreespinsFinishRequest(issue_id=issue_id, amount=amount)
 
 
 def _ok(body: Dict[str, Any]) -> DispatchResponse:

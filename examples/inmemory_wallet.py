@@ -14,6 +14,10 @@ have to happen:
    none does, and an insufficient-funds answer reports the balance as it was
    BEFORE the batch — because nothing moved.
 
+Freespins follow the same discipline with ``issue_id`` as the key: record the
+issue before you send Freespins/Issue, credit its ``/freespins/finish`` once, and
+answer a repeat with the balance you stored the first time.
+
 The lock below stands in for your ``BEGIN``/``COMMIT``. In a real wallet the
 dedupe read, the tombstone read and the balance update must all be in one
 database transaction. That is why the SDK does not offer to do idempotency for
@@ -34,6 +38,8 @@ from beexar import (
     BetWinTransactionResult,
     FinishRequest,
     FinishResult,
+    FreespinsFinishRequest,
+    FreespinsFinishResult,
     Money,
     RequestContext,
     RollbackRequest,
@@ -44,9 +50,14 @@ from beexar import (
 
 _OP_TX_ID = re.compile(r"^op-tx-(\d+)$")
 
+#: Where a freespins issue stands on the operator's side.
+FREESPINS_ISSUED = "issued"
+FREESPINS_CANCELED = "canceled"
+FREESPINS_FINISHED = "finished"
+
 
 class InMemoryWallet:
-    """The four callbacks over three dictionaries."""
+    """The five callbacks over four dictionaries."""
 
     def __init__(self, state: Optional[Dict[str, Any]] = None) -> None:
         state = state or {}
@@ -54,6 +65,9 @@ class InMemoryWallet:
         self._accounts: Dict[str, Dict[str, Any]] = {}
         self._transactions: Dict[str, Dict[str, str]] = {}
         self._tombstones: set = set()
+        # Whose freespins each issue is — /freespins/finish does not say — and,
+        # once credited, the amount and the balance answered then.
+        self._freespins_issues: Dict[str, Dict[str, str]] = {}
         self._rounds: Dict[str, str] = {}
         self._next_round = 1
 
@@ -72,6 +86,8 @@ class InMemoryWallet:
                 highest = max(highest, int(match.group(1)))
         for id_provider in state.get("tombstones") or []:
             self._tombstones.add(id_provider)
+        for issue_id, issue in (state.get("freespins_issues") or {}).items():
+            self._freespins_issues[issue_id] = dict(issue)
 
         # Continue the id sequence rather than restarting it, so ids stay unique
         # across a restored state.
@@ -90,6 +106,7 @@ class InMemoryWallet:
                 "accounts": accounts,
                 "transactions": {k: dict(v) for k, v in self._transactions.items()},
                 "tombstones": sorted(self._tombstones),
+                "freespins_issues": {k: dict(v) for k, v in self._freespins_issues.items()},
             }
 
     # --- /balance ----------------------------------------------------------
@@ -226,6 +243,66 @@ class InMemoryWallet:
         # Answering the current balance and staying idempotent is the whole job.
         with self._lock:
             return FinishResult(balance=self._account(request.account_id)["balance"])
+
+    # --- freespins ---------------------------------------------------------
+
+    def record_freespins_issue(self, issue_id: str, account_id: str, currency: str) -> None:
+        """Record an issue BEFORE you send it with ``Client.issue_freespins``.
+
+        ``/freespins/finish`` names only the ``issue_id``, so this record is what
+        says whose wallet, in which currency, to credit — and a Finish can never
+        arrive for an issue you do not know.
+        """
+        with self._lock:
+            self._freespins_issues.setdefault(
+                issue_id, {"account_id": account_id, "currency": currency, "status": FREESPINS_ISSUED}
+            )
+
+    def cancel_freespins_issue(self, issue_id: str) -> None:
+        """Mark an issue canceled once Beexar ACCEPTED ``Client.cancel_freespins``.
+
+        A refused cancel (620: already played out) leaves it issued, because its
+        ``/freespins/finish`` is on its way.
+        """
+        with self._lock:
+            issue = self._freespins_issues.get(issue_id)
+            if issue is not None and issue["status"] == FREESPINS_ISSUED:
+                issue["status"] = FREESPINS_CANCELED
+
+    def freespins_finish(self, request: FreespinsFinishRequest, context: RequestContext) -> FreespinsFinishResult:
+        with self._lock:
+            issue = self._freespins_issues.get(request.issue_id)
+            if issue is None:
+                raise WalletError.invalid_freespins_issue(
+                    "unknown freespins issue {}".format(request.issue_id)
+                )
+
+            # 1. Replay first, exactly as for id_provider: the platform retries
+            #    until it gets a 200, and the retry must credit nothing and
+            #    answer the balance stored the first time.
+            if issue["status"] == FREESPINS_FINISHED:
+                if "balance_after" not in issue:
+                    # Never credit a finished issue again; a 500 makes the
+                    # platform retry.
+                    raise RuntimeError(
+                        "freespins issue {} is finished but has no stored balance".format(request.issue_id)
+                    )
+                return FreespinsFinishResult(balance=Money.parse(issue["balance_after"]))
+            # 2. A canceled issue has no result to take.
+            if issue["status"] == FREESPINS_CANCELED:
+                raise WalletError.freespins_state_transition(
+                    "freespins issue {} was canceled".format(request.issue_id)
+                )
+
+            # 3. Credit, and record the answer with the issue — one transaction
+            #    in a real ledger, like everything else here. Zero is a valid
+            #    result.
+            account = self._account(issue["account_id"])
+            account["balance"] = account["balance"].add(request.amount)
+            issue["status"] = FREESPINS_FINISHED
+            issue["amount"] = str(request.amount)
+            issue["balance_after"] = str(account["balance"])
+            return FreespinsFinishResult(balance=account["balance"])
 
     # --- helpers -----------------------------------------------------------
 

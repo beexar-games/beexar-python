@@ -7,6 +7,7 @@ drift between languages while there is only one set of cases.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict
 
@@ -19,8 +20,13 @@ from conftest import conformance_root
 
 ROOT = conformance_root()
 
-MANIFEST: Dict[str, Any] = json.loads((ROOT / "manifest.json").read_text())
-SECRET = (ROOT / "secret.txt").read_text()
+# Explicit encoding: a fixture may carry non-ASCII bytes (0033), and the
+# platform default encoding is not UTF-8 everywhere the suite runs.
+MANIFEST: Dict[str, Any] = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
+SECRET = (ROOT / "secret.txt").read_text(encoding="utf-8")
+
+#: The shape the gateway sends: 64 lowercase hex characters.
+_WELL_FORMED = re.compile(r"[0-9a-f]{64}")
 
 
 class ExplodingWallet:
@@ -47,12 +53,16 @@ class ExplodingWallet:
     def finish(self, request, context):  # type: ignore[no-untyped-def]
         return self._wallet.finish(request, context)
 
+    def freespins_finish(self, request, context):  # type: ignore[no-untyped-def]
+        return self._wallet.freespins_finish(request, context)
+
 
 def _normalise(ledger: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "accounts": ledger.get("accounts") or {},
         "transactions": ledger.get("transactions") or {},
         "tombstones": sorted(ledger.get("tombstones") or []),
+        "freespins_issues": ledger.get("freespins_issues") or {},
     }
 
 
@@ -64,15 +74,17 @@ def test_the_manifest_is_the_full_set() -> None:
 def test_case(case: Dict[str, Any]) -> None:
     directory = ROOT / "cases" / case["dir"]
     body = (directory / "request.body").read_bytes()
-    request = json.loads((directory / "request.json").read_text())
-    before = json.loads((directory / "ledger.before.json").read_text())
-    after = json.loads((directory / "ledger.after.json").read_text())
-    expected = json.loads((directory / "response.json").read_text())
+    request = json.loads((directory / "request.json").read_text(encoding="utf-8"))
+    before = json.loads((directory / "ledger.before.json").read_text(encoding="utf-8"))
+    after = json.loads((directory / "ledger.after.json").read_text(encoding="utf-8"))
+    expected = json.loads((directory / "response.json").read_text(encoding="utf-8"))
 
     # A fixture whose stored signature does not match its own bytes would
-    # quietly test nothing, so the suite re-derives it.
+    # quietly test nothing, so the suite re-derives it -- but only a well-formed
+    # one: the all-zeros `wrong` sentinel and a deliberately malformed header
+    # (0033) are the case, not a drifted fixture.
     signature = request["headers"].get("X-REQUEST-SIGN")
-    if signature and signature != "0" * 64:
+    if signature and _WELL_FORMED.fullmatch(signature) and signature != "0" * 64:
         assert signature == sign(body, SECRET), "fixture signature does not match its own body"
 
     wallet = InMemoryWallet(before)

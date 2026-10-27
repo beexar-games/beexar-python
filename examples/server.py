@@ -4,7 +4,8 @@
 
 Point the four callback URLs in the backoffice at
 http://<host>/wallet/{balance,betwin,rollback,finish} and run the Integration
-Test Game against it.
+Test Game against it. If you issue freespins, point the freespins finish URL at
+http://<host>/wallet/freespins/finish as well.
 """
 
 from __future__ import annotations
@@ -59,5 +60,5 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8080"))
     print("beexar wallet listening on :{}".format(port))
-    print("  POST /wallet/balance  /wallet/betwin  /wallet/rollback  /wallet/finish")
+    print("  POST /wallet/balance  /wallet/betwin  /wallet/rollback  /wallet/finish  /wallet/freespins/finish")
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()

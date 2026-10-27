@@ -1,4 +1,5 @@
-"""The calls you send to Beexar: launch a session, list the catalogue."""
+"""The calls you send to Beexar: launch a session, list the catalogue, issue
+and cancel freespins, read the bet levels they are issued at."""
 
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ PRODUCTION_BASE_URL = "https://gateway.beexar.com"
 
 
 class Client:
-    """Launch sessions and read the catalogue.
+    """Launch sessions, read the catalogue, issue and cancel freespins.
 
     Every POST is signed with ``hex(HMAC-SHA256(body, api_secret))`` over the
     exact bytes that go on the wire — the body is encoded once, signed, and
@@ -49,11 +50,11 @@ class Client:
 
     def launch_real(self, request: Dict[str, Any]) -> str:
         """Launch a real-money session and return the URL to embed."""
-        return self._post_signed("/api/v1/softswiss/launcher/real", request)
+        return str(self._post_signed("/api/v1/softswiss/launcher/real", request).get("launch_url", ""))
 
     def launch_demo(self, request: Dict[str, Any]) -> str:
         """Launch a demo session on a virtual balance. No wallet callbacks."""
-        return self._post_signed("/api/v1/softswiss/launcher/demo", request)
+        return str(self._post_signed("/api/v1/softswiss/launcher/demo", request).get("launch_url", ""))
 
     def list_games(
         self, operator: Optional[str] = None, active: Optional[bool] = None
@@ -71,7 +72,55 @@ class Client:
         games = decoded.get("games") or []
         return list(games)
 
-    def _post_signed(self, path: str, payload: Dict[str, Any]) -> str:
+    def issue_freespins(self, request: Dict[str, Any]) -> None:
+        """Freespins/Issue: give a player free rounds in the listed games.
+
+        ``request`` carries ``issue_id``, ``games``, ``freespins_quantity``,
+        ``bet_level`` (one from :meth:`bet_levels`), ``valid_until`` (UTC with a
+        ``Z``, at most one month ahead) and ``account`` (the launch account —
+        its ``id`` and ``currency`` decide whose freespins these are).
+
+        The player finds them on their next :meth:`launch_real` of one of those
+        games; what they win arrives once, on your ``/freespins/finish``
+        callback. Record the issue on your side before calling this — the
+        result names only ``issue_id``. A repeat with the same terms answers
+        like the first call, so retry a timeout or a 5xx with the SAME request:
+        a ``valid_until`` computed again is other terms, and other terms under
+        one ``issue_id`` answer 610.
+        """
+        # The answer is an empty object; a 200 is all there is to read.
+        self._post_signed("/api/v1/softswiss/freespins/issue", request)
+
+    def cancel_freespins(self, request: Dict[str, Any]) -> None:
+        """Freespins/Cancel (``{"issue_id": ...}``), at any time — even mid-play.
+
+        A canceled issue never reaches ``/freespins/finish``: what it won is
+        forfeited. Canceling an issue that has already been played out is
+        refused with api_code 620.
+        """
+        self._post_signed("/api/v1/softswiss/freespins/cancel", request)
+
+    def bet_levels(
+        self, games: Optional[List[str]] = None, currencies: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """Bet/Levels: the bet levels freespins can be issued at.
+
+        One entry per group of games whose levels are identical in every
+        currency: ``{"games": [...], "currencies": [{"currency": "EUR",
+        "bet_levels": [{"bet_level": 1, "amount": "0.10"}, ...]}]}``. ``amount``
+        is the TOTAL bet of one round, a decimal string — ``Money.parse`` it for
+        arithmetic. Unknown games and currencies are ignored; leave a filter out
+        for all of them.
+        """
+        request: Dict[str, Any] = {}
+        if games is not None:
+            request["games"] = list(games)
+        if currencies is not None:
+            request["currencies"] = list(currencies)
+        levels = self._post_signed("/api/v1/softswiss/bet/levels", request).get("bet_levels") or []
+        return list(levels)
+
+    def _post_signed(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         body_dict = dict(payload)
         body_dict["casino_id"] = self._casino_id
 
@@ -92,7 +141,7 @@ class Client:
         decoded = _decode(response)
         if status != 200:
             raise ApiError.from_envelope(status, decoded)
-        return str(decoded.get("launch_url", ""))
+        return decoded
 
     def _send(
         self, method: str, url: str, headers: Dict[str, str], body: Optional[bytes]

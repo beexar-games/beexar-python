@@ -159,6 +159,81 @@ Your handler has **15 seconds**. The platform retries 5xx and timeouts for up to
 30 seconds with the same `id_provider`; it does not retry insufficient funds,
 bet limits, bad requests or signature failures.
 
+## Freespins (optional)
+
+Freespins follow the SoftSwiss Freespins API one to one: you give a player N
+free rounds at a fixed bet, Beexar plays them without touching the wallet, and
+reports what they won once, when the issue is over. Three calls go out from
+you; one callback comes back.
+
+```python
+from datetime import datetime, timedelta, timezone
+
+# The bet levels each game offers, per currency. A level is the total bet of one round.
+levels = beexar.bet_levels(games=["dice"], currencies=["EUR"])
+
+# Record the issue on YOUR side first — the result will name only its issue_id.
+ledger.record_freespins_issue("fs-123", "player_123", "EUR")
+beexar.issue_freespins({
+    "issue_id": "fs-123",
+    "games": ["dice"],
+    "freespins_quantity": 10,
+    "bet_level": 1,
+    # UTC with a Z, at most one month ahead
+    "valid_until": (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "account": {"id": "player_123", "currency": "EUR"},
+})
+# The player launches the game as usual (launch_real) and finds them there.
+
+beexar.cancel_freespins({"issue_id": "fs-123"})  # any time; a canceled issue is never reported
+```
+
+A repeated `issue_freespins` with the same terms answers like the first, so
+retry a timeout with the **same** dict — a recomputed `valid_until` is other
+terms, refused with api_code 610.
+
+The result arrives on a fifth callback, `/freespins/finish`, carrying the issue
+id and the amount won — zero included. Give your handler one more method:
+
+```python
+from beexar import FreespinsFinishResult, WalletError
+
+class Wallet:
+    # … balance, bet_win, rollback, finish
+
+    def freespins_finish(self, request, context):
+        with self.db.transaction():  # ONE transaction, like bet_win
+            issue = self.freespins_issue(request.issue_id)
+            if issue is None:
+                raise WalletError.invalid_freespins_issue()        # api_code 610
+            if issue.finished:
+                return FreespinsFinishResult(issue.balance_after)  # a retry: credit nothing
+            if issue.canceled:
+                raise WalletError.freespins_state_transition()     # api_code 605: Beexar accepted your cancel
+            return FreespinsFinishResult(self.credit(issue, request.amount))
+```
+
+- It is sent **once per issue** — when the issue is played out, or expires with
+  spins played — and retried with the same body (after 1, 3 and 5 minutes, then
+  every 5) until you answer 200. Each attempt has the same **15 seconds** as the
+  round callbacks. Credit once per issue id; a repeat returns the balance you
+  stored the first time.
+- Answer `605` only for an issue whose cancel Beexar accepted — Beexar never
+  sends a Finish for one; a `605` to a Finish you did receive is retried like
+  any refusal.
+- Configure it in the backoffice as the operator's **freespins finish URL**, the
+  fifth callback URL next to the four, e.g.
+  `https://your-host/wallet/freespins/finish`. Leave it empty if you do not
+  offer freespins — `issue_freespins` then answers api_code 406.
+- A handler without `freespins_finish` keeps working unchanged; the route then
+  answers like an unknown one (api_code 404).
+- Paths are matched on their suffix, longest route first, so
+  `/wallet/freespins/finish` and `/wallet/finish` live under one prefix; the
+  FastAPI and Flask bindings register the route too.
+
+The reference wallet implements it end to end:
+[`examples/inmemory_wallet.py`](./examples/inmemory_wallet.py).
+
 ## Types come from the spec
 
 The dataclasses track the published OpenAPI documents (`openapi/` in this repo).

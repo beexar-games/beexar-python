@@ -25,6 +25,7 @@ from beexar import (
     BetWinTransaction,
     CURRENCY_PATTERN,
     FinishRequest,
+    FreespinsFinishRequest,
     RollbackRequest,
     RollbackTransaction,
     is_funds_related_code,
@@ -55,6 +56,7 @@ def test_every_spec_is_versioned() -> None:
         ("RoundRollbackRequest", RollbackRequest, {}),
         ("RoundRollbackRequestTransaction", RollbackTransaction, {"type": None}),
         ("RoundFinishRequest", FinishRequest, {}),
+        ("FreespinsFinishRequest", FreespinsFinishRequest, {}),
     ],
 )
 def test_every_property_in_the_spec_reaches_the_handler(
@@ -81,8 +83,18 @@ def test_currency_pattern_matches_the_spec() -> None:
     assert from_spec == CURRENCY_PATTERN
 
 
-def test_routes_are_the_four_the_contract_defines() -> None:
-    assert ROUTES == ("/balance", "/betwin", "/rollback", "/finish")
+def test_routes_are_the_five_the_contract_defines() -> None:
+    assert ROUTES == ("/balance", "/betwin", "/rollback", "/finish", "/freespins/finish")
+
+
+def test_freespins_finish_requires_what_the_parser_enforces() -> None:
+    # The parser refuses a request without either; a field the spec makes
+    # required later must not stay optional here.
+    wallet = CONTRACT["schemas"]["wallet"]
+    assert wallet["FreespinsFinishRequest"]["required"] == ["amount", "issue_id"]
+    # The answer is a lone balance, which is what the server builds.
+    assert wallet["FreespinsFinishResponse"]["required"] == ["balance"]
+    assert list(wallet["FreespinsFinishResponse"]["properties"]) == ["balance"]
 
 
 def test_funds_related_codes_are_exactly_the_three() -> None:
@@ -90,5 +102,12 @@ def test_funds_related_codes_are_exactly_the_three() -> None:
     # downstream complains if we get this wrong — which is why it is pinned.
     for code in (ApiCode.INSUFFICIENT_FUNDS, ApiCode.BET_LIMIT_REACHED, ApiCode.MAX_BET_EXCEEDED):
         assert is_funds_related_code(code)
-    for code in (ApiCode.INVALID_PLAYER, ApiCode.FORBIDDEN, ApiCode.ALREADY_ROLLED_BACK, ApiCode.BAD_REQUEST):
+    for code in (
+        ApiCode.INVALID_PLAYER,
+        ApiCode.FORBIDDEN,
+        ApiCode.ALREADY_ROLLED_BACK,
+        ApiCode.BAD_REQUEST,
+        ApiCode.FREESPINS_INVALID_ISSUE,
+        ApiCode.FREESPINS_STATE_TRANSITION,
+    ):
         assert not is_funds_related_code(code)

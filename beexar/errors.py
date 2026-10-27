@@ -46,6 +46,21 @@ class ApiCode:
     SERVICE_UNAVAILABLE = "503"
     REQUEST_TIMEOUT = "504"
 
+    #: Freespins. Beexar answers your ``issue_freespins`` / ``cancel_freespins``
+    #: with 405, 406 and the 6xx codes; your ``/freespins/finish`` answers 610
+    #: for an issue you never issued and 605 for one you canceled.
+    #: 406: this feature is not enabled for your casino.
+    FREESPINS_NOT_AVAILABLE = "406"
+    FREESPINS_IMPOSSIBLE = "601"
+    FREESPINS_NO_GAME = "602"
+    FREESPINS_BAD_EXPIRATION = "603"
+    FREESPINS_STATE_TRANSITION = "605"
+    #: 608: feature is not supported for the requested game.
+    FEATURE_NOT_SUPPORTED = "608"
+    FREESPINS_INVALID_ISSUE = "610"
+    FREESPINS_EXPIRED = "611"
+    FREESPINS_CANT_CANCEL = "620"
+
 
 class TwirpCode:
     """The only two ``code`` values this contract uses."""
@@ -141,6 +156,23 @@ class WalletError(Exception):
         """The transaction's ``id_provider`` was already rolled back (tombstoned)."""
         return cls(400, TwirpCode.INVALID_ARGUMENT, ApiCode.ALREADY_ROLLED_BACK, message)
 
+    # --- freespins ---------------------------------------------------------
+
+    @classmethod
+    def invalid_freespins_issue(cls, message: str = "invalid freespins issue") -> "WalletError":
+        """api_code 610: ``/freespins/finish`` names an ``issue_id`` you never issued."""
+        return cls(400, TwirpCode.INVALID_ARGUMENT, ApiCode.FREESPINS_INVALID_ISSUE, message)
+
+    @classmethod
+    def freespins_state_transition(
+        cls, message: str = "can't change issue state from its current to requested"
+    ) -> "WalletError":
+        """api_code 605: the issue cannot take this result in its current state.
+
+        On ``/freespins/finish``, an issue you canceled.
+        """
+        return cls(400, TwirpCode.INVALID_ARGUMENT, ApiCode.FREESPINS_STATE_TRANSITION, message)
+
     # --- server ------------------------------------------------------------
 
     @classmethod
@@ -171,7 +203,11 @@ class WalletError(Exception):
 
 
 class ApiError(Exception):
-    """An error answer from the Beexar gateway to one of YOUR calls."""
+    """An error answer from the Beexar gateway to one of YOUR calls.
+
+    ``launch_real``, ``launch_demo``, ``list_games``, ``issue_freespins``,
+    ``cancel_freespins`` and ``bet_levels`` raise it for any status but 200.
+    """
 
     def __init__(self, http_status: int, code: str, api_code: str, message: str) -> None:
         super().__init__(message)

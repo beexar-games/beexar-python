@@ -10,12 +10,15 @@ from beexar import (
     BetWinResult,
     BetWinTransactionResult,
     FinishResult,
+    FreespinsFinishRequest,
+    FreespinsFinishResult,
     Money,
     RollbackResult,
     WalletError,
     WalletServer,
     route_from_path,
     sign,
+    verify,
 )
 
 SECRET = "unit-test-secret"
@@ -71,6 +74,19 @@ def test_refuses_an_empty_api_secret(secret: str) -> None:
 def test_signature_failure_is_400_with_api_code_403() -> None:
     out = server().dispatch("/balance", b"{}", "0" * 64)
     assert out.status == 400, "the wallet contract never answers HTTP 403"
+    assert json.loads(out.body)["meta"]["api_code"] == ApiCode.FORBIDDEN
+
+
+@pytest.mark.parametrize("signature", ["é" * 64, "é"])
+def test_verify_refuses_a_non_ascii_signature(signature: str) -> None:
+    # compare_digest raises TypeError on a str with a non-ASCII character; a
+    # header is not allowed to turn into an exception, only into False.
+    assert verify(b"{}", signature, SECRET) is False
+
+
+def test_non_ascii_signature_is_400_with_api_code_403() -> None:
+    out = server().dispatch("/balance", b"{}", "é" * 64)
+    assert out.status == 400
     assert json.loads(out.body)["meta"]["api_code"] == ApiCode.FORBIDDEN
 
 
@@ -164,3 +180,91 @@ def test_route_from_path_accepts_any_mount_prefix(path: str) -> None:
 
 def test_route_from_path_ignores_everything_else() -> None:
     assert route_from_path("/health") is None
+
+
+class FreespinsStubWallet(StubWallet):
+    """StubWallet plus the optional fifth method."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.seen: FreespinsFinishRequest = None  # type: ignore[assignment]
+
+    def freespins_finish(self, request, context):  # type: ignore[no-untyped-def]
+        self.seen = request
+        return FreespinsFinishResult(balance=Money.parse("112.50"))
+
+
+FREESPINS_FINISH = b'{"issue_id":"fs-1","amount":"12.50"}'
+
+
+def test_freespins_finish_reaches_the_optional_handler() -> None:
+    wallet = FreespinsStubWallet()
+    srv = WalletServer(wallet, SECRET)
+
+    out = srv.dispatch("/freespins/finish", FREESPINS_FINISH, signed(FREESPINS_FINISH))
+    assert out.status == 200
+    assert json.loads(out.body) == {"balance": "112.50"}
+    assert wallet.seen.issue_id == "fs-1"
+    assert str(wallet.seen.amount) == "12.50"
+
+    # Zero is a result here, not a bad request: the freespins won nothing.
+    zero = b'{"issue_id":"fs-1","amount":"0"}'
+    assert srv.dispatch("/freespins/finish", zero, signed(zero)).status == 200
+    assert wallet.seen.amount.is_zero()
+
+
+@pytest.mark.parametrize(
+    "body,message",
+    [
+        (b'{"issue_id":"fs-1","amount":"-1.00"}', "amount: not a valid decimal amount"),
+        (b'{"issue_id":"fs-1","amount":12.5}', "amount: not a valid decimal amount"),
+        (b'{"issue_id":"fs-1"}', "amount: not a valid decimal amount"),
+        (b'{"amount":"12.50"}', "issue_id: required, must be a non-empty string"),
+    ],
+)
+def test_freespins_finish_is_validated_before_the_handler(body: bytes, message: str) -> None:
+    wallet = FreespinsStubWallet()
+    out = WalletServer(wallet, SECRET).dispatch("/freespins/finish", body, signed(body))
+    assert out.status == 400
+    assert json.loads(out.body)["msg"] == message
+    assert wallet.seen is None
+
+
+def test_freespins_finish_without_the_handler_answers_like_an_unknown_route() -> None:
+    # StubWallet has the four methods only — a wallet written before freespins
+    # existed, or one that does not offer them. It must keep working, and answer
+    # /freespins/finish the way an unknown route is.
+    out = server().dispatch("/freespins/finish", FREESPINS_FINISH, signed(FREESPINS_FINISH))
+    assert out.status == 400
+    assert json.loads(out.body) == {
+        "code": "invalid_argument",
+        "msg": "freespins finish is not implemented by this wallet",
+        "meta": {"api_code": ApiCode.NOT_FOUND, "api_message": "freespins finish is not implemented by this wallet"},
+    }
+    body = b'{"account_id":"p","currency":"EUR","game_id":"d"}'
+    assert server().dispatch("/balance", body, signed(body)).status == 200
+
+
+def test_freespins_refusals_carry_their_api_codes() -> None:
+    assert WalletError.invalid_freespins_issue().to_envelope()["meta"]["api_code"] == "610"
+    assert WalletError.freespins_state_transition().to_envelope()["meta"]["api_code"] == "605"
+
+
+@pytest.mark.parametrize(
+    "path,route",
+    [
+        ("/freespins/finish", "/freespins/finish"),
+        ("/x/freespins/finish", "/freespins/finish"),
+        ("/wallet/freespins/finish/", "/freespins/finish"),
+        ("/finish", "/finish"),
+        ("/x/finish", "/finish"),
+    ],
+)
+def test_route_from_path_prefers_the_longest_route(path: str, route: str) -> None:
+    # /freespins/finish ends with /finish too. Matching the shorter route first
+    # would hand a freespins result to the round's finish handler.
+    assert route_from_path(path) == route
+
+
+def test_route_from_path_does_not_match_a_bare_prefix() -> None:
+    assert route_from_path("/freespins") is None

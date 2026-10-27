@@ -29,12 +29,16 @@ __all__ = [
     "RollbackResult",
     "FinishRequest",
     "FinishResult",
+    "FreespinsFinishRequest",
+    "FreespinsFinishResult",
     "WalletHandler",
 ]
 
-#: The four callback paths, exactly as the contract names them.
+#: The callback paths, exactly as the contract names them: the four every
+#: wallet serves, and ``/freespins/finish``, which only a wallet that issues
+#: freespins does (see :class:`WalletHandler`).
 Route = str
-ROUTES = ("/balance", "/betwin", "/rollback", "/finish")
+ROUTES = ("/balance", "/betwin", "/rollback", "/finish", "/freespins/finish")
 
 
 @dataclass(frozen=True)
@@ -154,6 +158,26 @@ class FinishResult:
     balance: Money
 
 
+@dataclass(frozen=True)
+class FreespinsFinishRequest:
+    """The result of a freespins issue: what its freespins won in total."""
+
+    #: YOUR id for the issue — the ``issue_id`` you sent to
+    #: :meth:`~beexar.launcher.Client.issue_freespins`.
+    issue_id: str
+    #: The total won, in the issue's currency at its scale. Zero or more —
+    #: zero (``"0.00"`` in EUR, ``"0"`` in JPY) is a valid result, not an
+    #: error: the freespins were played and won nothing.
+    amount: Money
+
+
+@dataclass(frozen=True)
+class FreespinsFinishResult:
+    #: The balance after the credit. On a repeat, the one you returned the
+    #: first time.
+    balance: Money
+
+
 class WalletHandler:
     """The four methods you implement against your own ledger.
 
@@ -164,6 +188,14 @@ class WalletHandler:
 
     Subclass it, or just pass any object with these four methods — the server
     only ever calls them by name.
+
+    A wallet that issues freespins adds a fifth,
+    ``freespins_finish(request: FreespinsFinishRequest, context) ->
+    FreespinsFinishResult``, for ``/freespins/finish``: credit
+    ``request.amount`` to the player of the issue once per ``issue_id``, and
+    answer a repeat with the balance stored the first time. It is optional on
+    purpose and not declared here — a handler without it answers that route
+    the way an unknown one is answered (api_code 404).
     """
 
     def balance(self, request: BalanceRequest, context: RequestContext) -> BalanceResult:

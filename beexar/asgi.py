@@ -11,13 +11,14 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, Optional
 
 from .signature import SIGNATURE_HEADER
+from .types import ROUTES
 from .wallet import WalletServer, route_from_path
 
 __all__ = ["asgi_app", "fastapi_router", "flask_blueprint"]
 
 
 def asgi_app(server: WalletServer) -> Callable[..., Any]:
-    """A bare ASGI application serving the four callbacks.
+    """A bare ASGI application serving the callbacks.
 
     Mount it under any prefix; the routes are matched on the path suffix.
     """
@@ -60,7 +61,7 @@ async def _send_json(send: Callable[..., Any], status: int, body: bytes) -> None
 
 
 def fastapi_router(server: WalletServer, prefix: str = "") -> Any:
-    """A FastAPI ``APIRouter`` with the four callbacks.
+    """A FastAPI ``APIRouter`` with the callbacks.
 
     The handlers declare ``Request`` and call ``await request.body()`` rather
     than a typed model. Declaring a model would make Starlette parse the JSON,
@@ -80,14 +81,14 @@ def fastapi_router(server: WalletServer, prefix: str = "") -> Any:
 
         return endpoint
 
-    for route in ("/balance", "/betwin", "/rollback", "/finish"):
+    for route in ROUTES:
         router.add_api_route(route, make(route), methods=["POST"])
 
     return router
 
 
 def flask_blueprint(server: WalletServer, name: str = "beexar_wallet", url_prefix: Optional[str] = None) -> Any:
-    """A Flask ``Blueprint`` with the four callbacks.
+    """A Flask ``Blueprint`` with the callbacks.
 
     Uses ``request.get_data(cache=True)``, which yields ``bytes``.
     ``get_data(as_text=True)`` re-decodes the body and is the usual way a Flask
@@ -107,7 +108,7 @@ def flask_blueprint(server: WalletServer, name: str = "beexar_wallet", url_prefi
         endpoint.__name__ = "beexar" + route.replace("/", "_")
         return endpoint
 
-    for route in ("/balance", "/betwin", "/rollback", "/finish"):
+    for route in ROUTES:
         blueprint.add_url_rule(route, view_func=make(route), methods=["POST"])
 
     return blueprint
